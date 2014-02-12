@@ -16,9 +16,16 @@ import os
 import numpy as np
 from scipy.cluster import vq
 import cv2 
+import random
+import easygui as eg
+from Tkinter import *
+from PIL import Image, ImageTk
+import time
+from PIL import ImageFile
+from datetime import datetime
+
 
 #constants
-PRE_ALLOCATION_BUFFER = 1000
 K_THRESH = 1 # early stopping threshold for kmeans originally at 1e-5, increased for speedup
 EXTENSIONS = [".jpg", ".bmp", ".png", ".pgm", ".tif", ".tiff"]
 DATASETPATH = 'images'
@@ -128,9 +135,9 @@ def writeHistogramsToFile(nwords, labels, fnames, all_word_histgrams, features_f
         fmt = fmt + '%f '
     np.savetxt(features_fname, data_rows, fmt)
 
-def dict2numpy(dict):
+def dict2numpy(dict, X, Y):
     nkeys = len(dict)
-    array = np.zeros((nkeys * PRE_ALLOCATION_BUFFER, OCTAVES))
+    array = np.zeros((nkeys * X, Y))
     pivot = 0
     for key in dict.keys():
         value = dict[key]
@@ -140,43 +147,42 @@ def dict2numpy(dict):
             array = np.vstack((array, padding))
         array[pivot:pivot + nelements] = value
         pivot += nelements
-    array = np.resize(array, (pivot, OCTAVES))
+    array = np.resize(array, (pivot, Y))
     return array
 
 
 
-def extractSURF(img, features_to_return, error_margin):
+def extractSURF(img, nfeatures, precision):
 	gray= cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
 	threshold = 500
 	kp = 0
 	iterations = 0
 	completed = False
-	top_error_margin = features_to_return + int(features_to_return * error_margin)
-	bottom_error_margin = features_to_return - int(features_to_return * error_margin)
+	top_margin = nfeatures + int(nfeatures * precision)
+	bottom_margin = nfeatures - int(nfeatures * precision)
 	while completed == False:
 		if threshold <= 2 : completed = True
 		features = cv2.SURF(threshold)
 		kp, descriptors = features.detectAndCompute(gray, None)
 		iterations += 1
-		print "number of kp, descriptors:", len(kp), len(descriptors)	
+		print "number of kp, descriptors:", len(kp), len(descriptors)
+		TextOut(( "number of kp, descriptors:" + str(len(kp))) )
 		print "Threshold:", threshold
-		print "Target # features range:", bottom_error_margin, " - ", top_error_margin 
+		print "Target # features range:", bottom_margin, " - ", top_margin 
 		print "Iterations:", iterations
-		if (len(kp) < bottom_error_margin):
-			threshold = int(threshold * 0.91)
-		elif (len(kp) > top_error_margin ):	
-			threshold = int(threshold * 1.11)
+		if (len(kp) < bottom_margin):
+			threshold = int(threshold * 0.91) - random.randint(0,1)
+		elif (len(kp) > top_margin ):	
+			threshold = int(threshold * 1.11) + random.randint(0,1)
 		else:
 			completed = True
 		#if delta < 1: delta = 1
 		if threshold < 5 : threshold = threshold  - 1
-				
+		frame3.pack()
+		#main_gui.mainloop()		
 	return gray, kp, descriptors
 
-
-
 def processSURF(input_files):
-	global OCTAVES; OCTAVES = 128
 	print "extracting SUFR features"
 	cv2.namedWindow('SURF Features', cv2.CV_WINDOW_AUTOSIZE)
 	all_features_dict = {}
@@ -213,7 +219,8 @@ def testSURF(datasetpath, cats):
 #--------------------------------------------
     print "---------------------"
     print "## computing the visual words via k-means"
-    all_features_array = dict2numpy(all_features)
+    TextOut("computing the visual words via k-means")
+    all_features_array = dict2numpy(all_features, 1000, 128)
     nfeatures = all_features_array.shape[0]
     nclusters = int(np.sqrt(nfeatures))
     print "## Number of words in codebook:", nclusters
@@ -255,6 +262,10 @@ def testSURF(datasetpath, cats):
 	print "---------------------"
 	print "## train learning machines"
 
+	#svm = cv2.SVM()
+	#svm.train(Features, classID)
+	#svm.save('svm_data.dat')
+
 	from sklearn.linear_model import LogisticRegression
 	clf2 = LogisticRegression().fit(Features, classID)
 	pickle.dump( clf2 , open( MODEL_FILE_LR, "wb" ) )
@@ -265,7 +276,7 @@ def testSURF(datasetpath, cats):
 	pickle.dump( model, open( MODEL_FILE_SVM, "wb" ) )
 
 	from sklearn.neighbors import KNeighborsClassifier
-	neigh = KNeighborsClassifier(n_neighbors=2)
+	neigh = KNeighborsClassifier(n_neighbors=3)
 	neigh.fit(Features, classID)
 	pickle.dump( neigh, open(MODEL_FILE_KNN, "wb" ) )
 
@@ -336,7 +347,7 @@ def runtests_SURF():
 				print "SVM decision: ", model_svm.decision_function(word_histgram)
 
 				from sklearn.neighbors import KNeighborsClassifier
-				KNN_clf = KNeighborsClassifier(n_neighbors=2)
+				KNN_clf = KNeighborsClassifier(n_neighbors=3)
 				KNN_clf = pickle.load( open( MODEL_FILE_KNN, "rb" ) )
 				KNN_classID = KNN_clf.predict(word_histgram)
 				print "KNN predicted classID:", KNN_classID 
@@ -358,6 +369,31 @@ def runtests_SURF():
 
 	return 
 
+def TextOut(text):
+	if (paused.get() != 'UN-PAUSE'):
+		#Textbox1.insert(END, str(datetime.now()) + ':' + text +'\n') #print new line in textbox
+		Textbox1.insert(END, text +'\n') #print new line in textbox
+		Textbox1.yview(END) 			#autoscroll
+		main_gui.update_idletasks()
+
+
+def toggle_button_pause():
+	'''
+	use
+	t_btn.config('text')[-1]
+	to get the present state of the toggle button
+	'''
+	if button_pause.config('text')[-1] == 'UN-PAUSE':
+		#button_pause.config(text='PAUSE')
+		paused.set('PAUSE')
+	else:
+		#button_pause.config(text='UN-PAUSE')
+		paused.set('UN-PAUSE')
+
+def update_display():
+		main_gui.after(1000, update_display)
+
+
 if __name__ == '__main__':
 	print "---------------------"
 	print "## loading the images and extracting features"
@@ -372,9 +408,87 @@ if __name__ == '__main__':
 	print cats
 	print "---------------------"
 
-	testSURF(datasetpath, cats)
-	runtests_SURF()
+	
+	#runtests_SURF()
 
+	main_gui = Tk()
+	main_gui.geometry("800x600")
 
+	com_status = StringVar()
+	com_status.set('COM INACTIVE')
+	
+	frame1=Frame(main_gui,  bd=1, relief=SUNKEN)
+	frame2=Frame(main_gui,  bd=1, relief=SUNKEN)
+	frame3=Frame(main_gui,  bd=1, relief=SUNKEN)
+	frame4=Frame(main_gui,  bd=1, relief=SUNKEN)
+
+	Button_Com_Status = Button(frame1, textvariable=com_status);
+	Button_Com_Status.pack();
+
+	button_search_for_bot = Button(frame1, text="Build Codebook SURF", command=lambda: testSURF(datasetpath, cats));
+	#button_search_for_bot.grid(row=0, column=1, sticky=W)
+	button_search_for_bot.pack(side=LEFT)
+	#Button_Enable_Motors = Button(frame1, text="Enable Drive Motors", command=enable_drive_motors)
+	#Button_Enable_Motors.pack(side=LEFT)
+	MF = Button(frame1, text="runtests_SURF()", command=lambda: runtests_SURF());
+	#MF.grid(row=0, column=1, sticky=W)
+ 	MB = Button(frame1, text="Reverse", command=lambda: send_command_to_robot('b', ROBOT_IP, PORT))
+	#MB.grid(row=0, column=2, sticky=W)
+	ML = Button(frame1, text="Left", command=lambda: send_command_to_robot('l', ROBOT_IP, PORT))
+	#ML.grid(row=1, column=1, sticky=W)
+	MR = Button(frame1, text="Right", command=lambda: send_command_to_robot('r', ROBOT_IP, PORT))
+	#MR.grid(row=1, column=2, sticky=W)
+	MF.pack(side=LEFT)
+	MB.pack(side=LEFT)
+	ML.pack(side=LEFT)
+	MR.pack(side=LEFT)
+	frame1.pack( padx=5, pady=5)	
+
+	#Button_Enable_Motors.configure(background='green')
+	MF.configure(state=DISABLED, background='red')
+	MB.configure(state=DISABLED, background='red')
+	ML.configure(state=DISABLED, background='red')
+	MR.configure(state=DISABLED, background='red')
+
+	image = Image.open("images/class0/image_0001.jpg")
+	#sonar = Image.open('sonar_image.png')
+	#sonar.thumbnail((440,440))
+	photo1 = ImageTk.PhotoImage(image)
+	camera_1 = Label(frame2, image=photo1, bd=1, relief=SUNKEN)
+	camera_1.pack(side=LEFT, padx=5, pady=5)
+	#sonar_img = ImageTk.PhotoImage(sonar)
+	#sonar_display = Label(frame2, image=sonar_img, bd=1, relief=SUNKEN)
+	#sonar_display.pack(side=LEFT, padx=5, pady=5)
+	#frame2.pack()
+
+	s = Scrollbar(frame3)
+	Textbox1 = Text(frame3)
+	Textbox1.focus_set()
+	s.pack(side=RIGHT, fill=Y)
+	Textbox1.pack(side=RIGHT)#, fill=Tkinter.Y)
+	s.config(command=Textbox1.yview)
+	Textbox1.config(yscrollcommand=s.set, width=60)#, height=50)
+	frame3.pack()
+
+	Button_Update_Image = Button(frame4, text="Grab Images", command=lambda: update_images(ROBOT_IP, 12345)); 
+	Button_Update_Image.pack(side=LEFT);
+	button_toggle_sonar = Button(frame4, text="Update Sonar", command=lambda: update_sonar(ROBOT_IP, 12345));
+	button_toggle_sonar.pack()
+	#frame3.pack(anchor=NW)
+	frame4.pack()
+#
+	paused = StringVar()
+	paused.set('PAUSE')
+	button_pause = Button(main_gui, textvariable=paused, command=toggle_button_pause);button_pause.pack();
+
+	#Button_show_Image = Button(main_gui, text="Load Image", command=random_image).pack(); 
+	
+	var_IP_of_bot = StringVar(None)
+	IP_of_bot = Entry(main_gui, textvariable=var_IP_of_bot)
+	IP_of_bot.pack()
+
+	#frame1.pack_forget()
+	update_display()
+	main_gui.mainloop()
 
 
